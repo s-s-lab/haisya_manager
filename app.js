@@ -1,8 +1,9 @@
 /*
- * Team Ride Planner frontend
- * 1) GASをWebアプリとしてデプロイ
- * 2) 下のAPI_URLを /exec のURLに差し替え
- * 3) GitHub Pagesで index.html と app.js を公開
+ * Team Ride Planner frontend v3
+ * - No embedded Google Map on the top page
+ * - Existing event open by eventId
+ * - Driver/rider origin is nearest station
+ * - Edit/delete members
  */
 const API_URL = 'https://script.google.com/macros/s/AKfycbx-RP8Tgs3I2wGxLhf_7WMf9YGXNyrdXpGZ1-YJdCWVghrOoJrMAVQcAGFs3RcpyppVlg/exec';
 
@@ -61,9 +62,6 @@ function setLoading(button, loading, labelWhenLoading = '処理中...') {
 }
 
 async function apiPost(action, payload = {}) {
-  if (!API_URL || API_URL.includes('YOUR_GAS')) {
-    throw new Error('app.js の API_URL を GAS Webアプリの /exec URL に差し替えてください。');
-  }
   const res = await fetch(API_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -75,9 +73,6 @@ async function apiPost(action, payload = {}) {
 }
 
 async function apiGet(action, params = {}) {
-  if (!API_URL || API_URL.includes('YOUR_GAS')) {
-    throw new Error('app.js の API_URL を GAS Webアプリの /exec URL に差し替えてください。');
-  }
   const url = new URL(API_URL);
   url.searchParams.set('action', action);
   Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
@@ -101,11 +96,18 @@ function init() {
 }
 
 function bindEvents() {
+  $('#openEventBtn').addEventListener('click', openExistingEvent);
+  $('#existingEventId').addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') openExistingEvent();
+  });
   $('#createEventBtn').addEventListener('click', createEvent);
+  $('#copyEventIdBtn').addEventListener('click', copyEventId);
   $('#copyUrlBtn').addEventListener('click', copyShareUrl);
   $('#reloadBtn').addEventListener('click', loadEvent);
   $('#driverForm').addEventListener('submit', submitMemberForm);
   $('#riderForm').addEventListener('submit', submitMemberForm);
+  $('#driverCancelBtn').addEventListener('click', () => resetMemberForm('driver'));
+  $('#riderCancelBtn').addEventListener('click', () => resetMemberForm('rider'));
   $('#recommendBtn').addEventListener('click', loadRecommendations);
   $('#saveAssignmentsBtn').addEventListener('click', saveAssignments);
   $('#closeCostModalBtn').addEventListener('click', closeCostModal);
@@ -121,20 +123,30 @@ function bindEvents() {
   });
 }
 
+function openExistingEvent() {
+  const eventId = $('#existingEventId').value.trim();
+  if (!eventId) {
+    showToast('イベントIDを入力してください。');
+    return;
+  }
+  location.href = `${location.pathname}?eventId=${encodeURIComponent(eventId)}`;
+}
+
 async function createEvent() {
   const btn = $('#createEventBtn');
   const eventName = $('#eventName').value.trim();
   const eventDate = $('#eventDate').value;
+  const destinationName = $('#destinationName').value.trim();
   const destinationAddress = $('#destinationAddress').value.trim();
 
   if (!eventName || !destinationAddress) {
-    showToast('イベント名と目的地住所を入力してください。');
+    showToast('イベント名と目的地住所・施設名を入力してください。');
     return;
   }
 
   try {
     setLoading(btn, true, '作成中...');
-    const data = await apiPost('createEvent', { eventName, eventDate, destinationAddress });
+    const data = await apiPost('createEvent', { eventName, eventDate, destinationName, destinationAddress });
     location.href = `${location.pathname}?eventId=${encodeURIComponent(data.eventId)}`;
   } catch (error) {
     alert(error.message);
@@ -165,7 +177,10 @@ function renderAll() {
 
 function renderEventHeader() {
   $('#eventTitle').textContent = state.event?.eventName || '';
-  $('#eventMeta').textContent = `${state.event?.eventDate || '日付未設定'} / 目的地：${state.event?.destinationAddress || ''}`;
+  const destination = state.event?.destinationName
+    ? `${state.event.destinationName}（${state.event.destinationAddress || ''}）`
+    : state.event?.destinationAddress || '';
+  $('#eventMeta').textContent = `${state.event?.eventDate || '日付未設定'} / 目的地：${destination}`;
   $('#eventBadge').classList.remove('hidden');
   $('#eventBadge').textContent = `eventId: ${state.eventId}`;
 }
@@ -185,6 +200,7 @@ function submitMemberForm(event) {
   payload.eventId = state.eventId;
   payload.largeCargo = formData.has('largeCargo');
   payload.capacity = payload.type === 'driver' ? Number(payload.capacity || 1) : '';
+  if (!payload.memberId) delete payload.memberId;
 
   upsertMember(payload, form);
 }
@@ -192,12 +208,11 @@ function submitMemberForm(event) {
 async function upsertMember(payload, form) {
   const submitBtn = form.querySelector('button[type="submit"], button:not([type])');
   try {
-    setLoading(submitBtn, true, '登録中...');
+    setLoading(submitBtn, true, payload.memberId ? '更新中...' : '登録中...');
     await apiPost('upsertMember', payload);
-    form.reset();
-    if (payload.type === 'driver') form.querySelector('[name="capacity"]').value = 4;
+    resetMemberForm(payload.type);
     await loadEvent();
-    showToast('登録しました。');
+    showToast(payload.memberId ? '更新しました。' : '登録しました。');
   } catch (error) {
     alert(error.message);
   } finally {
@@ -205,14 +220,72 @@ async function upsertMember(payload, form) {
   }
 }
 
+function resetMemberForm(type) {
+  const form = type === 'driver' ? $('#driverForm') : $('#riderForm');
+  form.reset();
+  form.querySelector('[name="memberId"]').value = '';
+
+  if (type === 'driver') {
+    form.querySelector('[name="capacity"]').value = 4;
+    $('#driverFormTitle').textContent = 'ドライバー登録';
+    $('#driverSubmitBtn').textContent = 'ドライバーを登録';
+    $('#driverCancelBtn').classList.add('hidden');
+  } else {
+    $('#riderFormTitle').textContent = '同乗希望者登録';
+    $('#riderSubmitBtn').textContent = '同乗希望者を登録';
+    $('#riderCancelBtn').classList.add('hidden');
+  }
+}
+
+function editMember(memberId) {
+  const member = state.members.find((m) => m.memberId === memberId);
+  if (!member) return;
+
+  const form = member.type === 'driver' ? $('#driverForm') : $('#riderForm');
+  form.querySelector('[name="memberId"]').value = member.memberId;
+  form.querySelector('[name="name"]').value = member.name || '';
+  form.querySelector('[name="originStation"]').value = member.originStation || member.originAddress || '';
+  form.querySelector('[name="tripPref"]').value = member.tripPref || 'round';
+
+  if (member.type === 'driver') {
+    form.querySelector('[name="capacity"]').value = Number(member.capacity || 1);
+    form.querySelector('[name="largeCargo"]').checked = !!member.largeCargo;
+    $('#driverFormTitle').textContent = 'ドライバー情報を修正';
+    $('#driverSubmitBtn').textContent = 'ドライバー情報を更新';
+    $('#driverCancelBtn').classList.remove('hidden');
+  } else {
+    $('#riderFormTitle').textContent = '同乗希望者情報を修正';
+    $('#riderSubmitBtn').textContent = '同乗希望者情報を更新';
+    $('#riderCancelBtn').classList.remove('hidden');
+  }
+
+  form.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function deleteMember(memberId) {
+  const member = state.members.find((m) => m.memberId === memberId);
+  if (!member) return;
+  if (!confirm(`${member.name}さんを削除します。配車割当も削除されます。よろしいですか？`)) return;
+
+  try {
+    await apiPost('deleteMember', { eventId: state.eventId, memberId });
+    if (member.type === 'driver') resetMemberForm('driver');
+    if (member.type === 'rider') resetMemberForm('rider');
+    await loadEvent();
+    showToast('削除しました。');
+  } catch (error) {
+    alert(error.message);
+  }
+}
+
 async function loadRecommendations() {
   const btn = $('#recommendBtn');
-  const riderAddress = $('#riderAddress').value.trim();
+  const riderStation = $('#riderStation').value.trim();
   const tripPref = $('#riderTripPref').value;
   const trip = tripPref === 'return' ? 'return' : 'outbound';
 
-  if (!riderAddress) {
-    showToast('同乗希望者の住所を入力してください。');
+  if (!riderStation) {
+    showToast('同乗希望者の最寄り駅を入力してください。');
     return;
   }
   if (tripPref === 'local') {
@@ -222,7 +295,7 @@ async function loadRecommendations() {
 
   try {
     setLoading(btn, true, '計算中...');
-    const data = await apiPost('recommendDrivers', { eventId: state.eventId, riderAddress, trip });
+    const data = await apiPost('recommendDrivers', { eventId: state.eventId, riderStation, trip });
     renderRecommendations(data.recommendations || []);
   } catch (error) {
     alert(error.message);
@@ -248,7 +321,7 @@ function renderRecommendations(items) {
           <div class="flex items-center justify-between gap-3">
             <div>
               <p class="font-bold">${index + 1}. ${escapeHtml(item.driverName)}</p>
-              <p class="text-xs text-slate-500">${escapeHtml(item.driverOrigin)}</p>
+              <p class="text-xs text-slate-500">最寄り駅：${escapeHtml(item.driverStation)}</p>
             </div>
             <span class="rounded-full ${item.largeCargo ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500'} px-2 py-1 text-xs font-bold">
               ${item.largeCargo ? '大型荷物OK' : '大型荷物未対応'}
@@ -272,22 +345,34 @@ function renderMemberList() {
     <div class="rounded-2xl bg-slate-50 p-3">
       <p class="font-bold">ドライバー ${drivers.length}名</p>
       <div class="mt-2 space-y-2">
-        ${drivers.map((m) => `
-          <div class="rounded-xl bg-white p-3 text-sm ring-1 ring-slate-200">
-            <b>${escapeHtml(m.name)}</b> / ${TRIP_LABEL[m.tripPref] || m.tripPref} / ${Number(m.capacity || 1)}名
-            <br><span class="text-slate-500">${escapeHtml(m.originAddress)}</span>
-            ${m.largeCargo ? '<br><span class="font-bold text-green-700">大型荷物OK</span>' : ''}
-          </div>`).join('') || '<p class="text-sm text-slate-500">未登録</p>'}
+        ${drivers.map(renderMemberListItem).join('') || '<p class="text-sm text-slate-500">未登録</p>'}
       </div>
     </div>
     <div class="rounded-2xl bg-slate-50 p-3">
       <p class="font-bold">同乗希望者 ${riders.length}名</p>
       <div class="mt-2 space-y-2">
-        ${riders.map((m) => `
-          <div class="rounded-xl bg-white p-3 text-sm ring-1 ring-slate-200">
-            <b>${escapeHtml(m.name)}</b> / ${TRIP_LABEL[m.tripPref] || m.tripPref}
-            <br><span class="text-slate-500">${escapeHtml(m.originAddress)}</span>
-          </div>`).join('') || '<p class="text-sm text-slate-500">未登録</p>'}
+        ${riders.map(renderMemberListItem).join('') || '<p class="text-sm text-slate-500">未登録</p>'}
+      </div>
+    </div>`;
+
+  $$('.edit-member-btn').forEach((btn) => btn.addEventListener('click', () => editMember(btn.dataset.memberId)));
+  $$('.delete-member-btn').forEach((btn) => btn.addEventListener('click', () => deleteMember(btn.dataset.memberId)));
+}
+
+function renderMemberListItem(m) {
+  const station = m.originStation || m.originAddress || '';
+  return `
+    <div class="rounded-xl bg-white p-3 text-sm ring-1 ring-slate-200">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <b>${escapeHtml(m.name)}</b> / ${TRIP_LABEL[m.tripPref] || m.tripPref}${m.type === 'driver' ? ` / ${Number(m.capacity || 1)}名` : ''}
+          <br><span class="text-slate-500">最寄り駅：${escapeHtml(station)}</span>
+          ${m.largeCargo ? '<br><span class="font-bold text-green-700">大型荷物OK</span>' : ''}
+        </div>
+        <div class="flex shrink-0 gap-1">
+          <button class="edit-member-btn rounded-lg bg-team-50 px-2 py-1 text-xs font-bold text-team-700 hover:bg-team-100" data-member-id="${escapeHtml(m.memberId)}">修正</button>
+          <button class="delete-member-btn rounded-lg bg-red-50 px-2 py-1 text-xs font-bold text-red-700 hover:bg-red-100" data-member-id="${escapeHtml(m.memberId)}">削除</button>
+        </div>
       </div>
     </div>`;
 }
@@ -332,18 +417,20 @@ function renderAllocationBoard() {
 }
 
 function renderMemberCard(member) {
+  const station = member.originStation || member.originAddress || '';
   return `
     <div class="member-card cursor-grab rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 active:cursor-grabbing" data-member-id="${escapeHtml(member.memberId)}">
       <div class="flex items-center justify-between gap-2">
         <b>${escapeHtml(member.name)}</b>
         <span class="rounded-full bg-team-50 px-2 py-1 text-xs font-bold text-team-700">${TRIP_LABEL[member.tripPref] || member.tripPref}</span>
       </div>
-      <p class="mt-1 text-xs text-slate-500">${escapeHtml(member.originAddress)}</p>
+      <p class="mt-1 text-xs text-slate-500">最寄り駅：${escapeHtml(station)}</p>
     </div>`;
 }
 
 function renderDriverCard(driver) {
   const trip = state.currentTrip;
+  const station = driver.originStation || driver.originAddress || '';
   const assigned = state.assignments
     .filter((a) => a.trip === trip && a.driverId === driver.memberId)
     .sort((a, b) => Number(a.position) - Number(b.position))
@@ -355,7 +442,7 @@ function renderDriverCard(driver) {
       <div class="flex items-start justify-between gap-3">
         <div>
           <h4 class="text-lg font-bold">🚙 ${escapeHtml(driver.name)} 車</h4>
-          <p class="text-xs text-slate-500">${escapeHtml(driver.originAddress)}</p>
+          <p class="text-xs text-slate-500">最寄り駅：${escapeHtml(station)}</p>
           <p class="mt-1 text-xs font-bold ${driver.largeCargo ? 'text-green-700' : 'text-slate-400'}">${driver.largeCargo ? '大型荷物OK' : '大型荷物未対応'}</p>
         </div>
         <div class="text-right">
@@ -398,7 +485,7 @@ function updateCapacityCounts() {
   $$('.driver-card').forEach((card) => {
     const capacity = Number(card.dataset.capacity || 1);
     const passengerCount = card.querySelectorAll('.member-card').length;
-    const current = passengerCount + 1; // 運転者本人を含む
+    const current = passengerCount + 1;
     const count = card.querySelector('.capacity-count');
     const over = current > capacity;
     const full = current === capacity;
@@ -436,6 +523,10 @@ async function saveAssignments() {
   } finally {
     setLoading(btn, false);
   }
+}
+
+function copyEventId() {
+  navigator.clipboard.writeText(state.eventId).then(() => showToast('イベントIDをコピーしました。'));
 }
 
 function copyShareUrl() {
@@ -478,12 +569,10 @@ function getSettlementRows(driverId) {
     return rowsByMember.get(member.memberId);
   };
 
-  // 運転者本人
   const driverRow = ensure(driver, 'driver');
   driverRow.outbound = eligibleForTrip(driver, 'outbound');
   driverRow.return = eligibleForTrip(driver, 'return');
 
-  // 同乗者
   ['outbound', 'return'].forEach((trip) => {
     getRiderIdsByDriverAndTrip(driverId, trip).forEach((memberId) => {
       const member = state.members.find((m) => m.memberId === memberId);
