@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Team Ride Planner</title>
+  <title>Ride Planner</title>
 
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
@@ -33,7 +33,7 @@
       <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p class="text-sm font-semibold tracking-wider text-cyan-100">SPORTS TEAM EXPEDITION</p>
-          <h1 class="text-2xl font-bold sm:text-3xl">配車管理・割り勘計算</h1>
+          <h1 class="text-2xl font-bold sm:text-3xl">ライドプランナー（配車管理ツール）</h1>
         </div>
         <div id="eventBadge" class="hidden rounded-2xl bg-white/15 px-4 py-2 text-sm backdrop-blur"></div>
       </div>
@@ -52,7 +52,7 @@
       </div>
 
       <div class="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-8">
-        <h2 class="text-xl font-bold">新しい遠征イベントを作成</h2>
+        <h2 class="text-xl font-bold">新しいイベントを作成</h2>
         <p class="mt-2 text-sm text-slate-600">目的地は施設名・住所を手入力してください。作成後に共有URLが発行されます。</p>
 
         <div class="mt-6 grid gap-4 sm:grid-cols-2">
@@ -128,7 +128,7 @@
             </div>
             <label class="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2 text-sm font-semibold">
               <input name="largeCargo" type="checkbox" class="h-5 w-5 rounded border-slate-300 text-team-600" />
-              大型荷物の積載可（防具・バットケース等）
+              大型荷物の積載可
             </label>
             <div class="flex flex-col gap-2 sm:flex-row">
               <button id="driverSubmitBtn" class="rounded-2xl bg-grass px-4 py-3 font-bold text-white hover:bg-green-700">ドライバーを登録</button>
