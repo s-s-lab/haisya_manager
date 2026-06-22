@@ -5,7 +5,6 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Team Ride Planner</title>
 
-  <!-- Tailwind CSS CDN（GitHub Pages向けの簡易構成） -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -26,8 +25,6 @@
       }
     };
   </script>
-
-  <!-- SortableJS: touch対応D&D -->
   <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 </head>
 <body class="min-h-screen bg-slate-50 text-slate-800">
@@ -44,12 +41,21 @@
   </header>
 
   <main class="mx-auto max-w-6xl px-4 py-6">
-    <section id="setupView" class="hidden">
+    <section id="setupView" class="hidden space-y-6">
+      <div class="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-8">
+        <h2 class="text-xl font-bold">作成済みイベントを開く</h2>
+        <p class="mt-2 text-sm text-slate-600">共有されたイベントIDを入力すると、既存の配車ページを開けます。</p>
+        <div class="mt-5 flex flex-col gap-3 sm:flex-row">
+          <input id="existingEventId" class="w-full rounded-xl border border-slate-300 px-3 py-3 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" placeholder="例：abc123defg" />
+          <button id="openEventBtn" class="rounded-2xl bg-team-600 px-5 py-3 font-bold text-white hover:bg-team-700 sm:w-48">イベントを開く</button>
+        </div>
+      </div>
+
       <div class="rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 sm:p-8">
         <h2 class="text-xl font-bold">新しい遠征イベントを作成</h2>
-        <p class="mt-2 text-sm text-slate-600">作成後に共有URLが発行されます。URLを知っている人は誰でも編集できます。</p>
+        <p class="mt-2 text-sm text-slate-600">目的地は施設名・住所を手入力してください。作成後に共有URLが発行されます。</p>
 
-        <div class="mt-6 grid gap-4 sm:grid-cols-3">
+        <div class="mt-6 grid gap-4 sm:grid-cols-2">
           <label class="block">
             <span class="text-sm font-semibold">イベント名</span>
             <input id="eventName" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" placeholder="例：春季大会 遠征" />
@@ -59,8 +65,12 @@
             <input id="eventDate" type="date" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" />
           </label>
           <label class="block">
-            <span class="text-sm font-semibold">目的地住所</span>
-            <input id="destinationAddress" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" placeholder="例：〇〇市民球場" />
+            <span class="text-sm font-semibold">目的地名</span>
+            <input id="destinationName" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" placeholder="例：〇〇市民球場" />
+          </label>
+          <label class="block">
+            <span class="text-sm font-semibold">目的地住所・施設名</span>
+            <input id="destinationAddress" class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" placeholder="例：東京都文京区後楽1-3-61" />
           </label>
         </div>
 
@@ -78,6 +88,7 @@
             <p id="eventMeta" class="mt-1 text-sm text-slate-600"></p>
           </div>
           <div class="flex flex-col gap-2 sm:flex-row">
+            <button id="copyEventIdBtn" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">イベントIDをコピー</button>
             <button id="copyUrlBtn" class="rounded-xl border border-team-200 bg-team-50 px-4 py-2 text-sm font-bold text-team-700 hover:bg-team-100">共有URLをコピー</button>
             <button id="reloadBtn" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50">再読み込み</button>
           </div>
@@ -87,18 +98,19 @@
       <div class="grid gap-6 lg:grid-cols-2">
         <section class="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-bold">ドライバー登録</h3>
+            <h3 id="driverFormTitle" class="text-lg font-bold">ドライバー登録</h3>
             <span class="rounded-full bg-grass/10 px-3 py-1 text-xs font-bold text-grass">車を出せる人</span>
           </div>
           <form id="driverForm" class="mt-4 grid gap-3">
+            <input type="hidden" name="memberId" />
             <input type="hidden" name="type" value="driver" />
             <label class="block">
               <span class="text-sm font-semibold">名前</span>
               <input name="name" required class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" />
             </label>
             <label class="block">
-              <span class="text-sm font-semibold">出発地住所</span>
-              <input name="originAddress" required class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" />
+              <span class="text-sm font-semibold">出発予定地の最寄り駅</span>
+              <input name="originStation" required class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" placeholder="例：成城学園前" />
             </label>
             <div class="grid gap-3 sm:grid-cols-2">
               <label class="block">
@@ -118,24 +130,28 @@
               <input name="largeCargo" type="checkbox" class="h-5 w-5 rounded border-slate-300 text-team-600" />
               大型荷物の積載可（防具・バットケース等）
             </label>
-            <button class="rounded-2xl bg-grass px-4 py-3 font-bold text-white hover:bg-green-700">ドライバーを登録</button>
+            <div class="flex flex-col gap-2 sm:flex-row">
+              <button id="driverSubmitBtn" class="rounded-2xl bg-grass px-4 py-3 font-bold text-white hover:bg-green-700">ドライバーを登録</button>
+              <button id="driverCancelBtn" type="button" class="hidden rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold text-slate-700 hover:bg-slate-50">修正をキャンセル</button>
+            </div>
           </form>
         </section>
 
         <section class="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
           <div class="flex items-center justify-between">
-            <h3 class="text-lg font-bold">同乗希望者登録</h3>
+            <h3 id="riderFormTitle" class="text-lg font-bold">同乗希望者登録</h3>
             <span class="rounded-full bg-team-50 px-3 py-1 text-xs font-bold text-team-700">乗せてもらう人</span>
           </div>
           <form id="riderForm" class="mt-4 grid gap-3">
+            <input type="hidden" name="memberId" />
             <input type="hidden" name="type" value="rider" />
             <label class="block">
               <span class="text-sm font-semibold">名前</span>
               <input name="name" required class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" />
             </label>
             <label class="block">
-              <span class="text-sm font-semibold">出発地住所</span>
-              <input id="riderAddress" name="originAddress" required class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" />
+              <span class="text-sm font-semibold">出発地の最寄り駅</span>
+              <input id="riderStation" name="originStation" required class="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 focus:border-team-500 focus:outline-none focus:ring-2 focus:ring-team-100" placeholder="例：荻窪" />
             </label>
             <label class="block">
               <span class="text-sm font-semibold">希望区分</span>
@@ -147,8 +163,9 @@
               </select>
             </label>
             <div class="flex flex-col gap-2 sm:flex-row">
-              <button class="rounded-2xl bg-team-600 px-4 py-3 font-bold text-white hover:bg-team-700">同乗希望者を登録</button>
+              <button id="riderSubmitBtn" class="rounded-2xl bg-team-600 px-4 py-3 font-bold text-white hover:bg-team-700">同乗希望者を登録</button>
               <button id="recommendBtn" type="button" class="rounded-2xl border border-team-200 bg-team-50 px-4 py-3 font-bold text-team-700 hover:bg-team-100">おすすめ表示</button>
+              <button id="riderCancelBtn" type="button" class="hidden rounded-2xl border border-slate-200 bg-white px-4 py-3 font-bold text-slate-700 hover:bg-slate-50">修正をキャンセル</button>
             </div>
           </form>
 
@@ -160,7 +177,7 @@
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h3 class="text-lg font-bold">配車割り当て</h3>
-            <p class="text-sm text-slate-600">未配置メンバーを各車カードへドラッグしてください。スマホでは長押し気味に操作すると安定します。</p>
+            <p class="text-sm text-slate-600">未配置メンバーを各車カードへドラッグしてください。</p>
           </div>
           <div class="inline-flex rounded-2xl bg-slate-100 p-1">
             <button data-trip-tab="outbound" class="trip-tab rounded-xl px-4 py-2 text-sm font-bold">往路</button>
@@ -176,7 +193,8 @@
       </section>
 
       <section class="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-slate-200 sm:p-5">
-        <h3 class="text-lg font-bold">参加者一覧</h3>
+        <h3 class="text-lg font-bold">参加者一覧・修正</h3>
+        <p class="mt-1 text-sm text-slate-600">各メンバーの「修正」または「削除」から、後から情報を変更できます。</p>
         <div id="memberList" class="mt-4 grid gap-3 md:grid-cols-2"></div>
       </section>
     </section>
