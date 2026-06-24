@@ -1,11 +1,12 @@
 /*
- * Team Ride Planner frontend v3
- * - No embedded Google Map on the top page
- * - Existing event open by eventId
- * - Driver/rider origin is nearest station
- * - Edit/delete members
+ * Team Ride Planner frontend v4
+ * - Local browser-created event list
+ * - Driver/rider register both nearest station and address
+ * - Recommendations use destination address, rider address, and driver addresses
  */
+
 const API_URL = 'https://script.google.com/macros/s/AKfycbx-RP8Tgs3I2wGxLhf_7WMf9YGXNyrdXpGZ1-YJdCWVghrOoJrMAVQcAGFs3RcpyppVlg/exec';
+const LOCAL_EVENTS_KEY = 'teamRidePlanner.createdEvents.v1';
 
 const TRIP_LABEL = {
   outbound: '往路',
@@ -61,6 +62,76 @@ function setLoading(button, loading, labelWhenLoading = '処理中...') {
   }
 }
 
+function getLocalEvents() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_EVENTS_KEY) || '[]');
+  } catch (error) {
+    return [];
+  }
+}
+
+function saveLocalEvents(events) {
+  localStorage.setItem(LOCAL_EVENTS_KEY, JSON.stringify(events));
+}
+
+function rememberCreatedEvent(eventInfo) {
+  const events = getLocalEvents();
+  const next = [
+    {
+      eventId: eventInfo.eventId,
+      eventName: eventInfo.eventName || '',
+      eventDate: eventInfo.eventDate || '',
+      destinationName: eventInfo.destinationName || '',
+      destinationAddress: eventInfo.destinationAddress || '',
+      createdAt: eventInfo.createdAt || new Date().toISOString()
+    },
+    ...events.filter((e) => e.eventId !== eventInfo.eventId)
+  ].slice(0, 30);
+
+  saveLocalEvents(next);
+}
+
+function renderLocalEvents() {
+  const box = $('#localEventList');
+  if (!box) return;
+
+  const events = getLocalEvents();
+
+  if (!events.length) {
+    box.innerHTML = `
+      <div class="rounded-2xl bg-slate-50 p-4 text-sm text-slate-600 ring-1 ring-slate-200">
+        このブラウザで作成したイベントはまだありません。
+      </div>`;
+    return;
+  }
+
+  box.innerHTML = events.map((event) => {
+    const destination = event.destinationName
+      ? `${event.destinationName} / ${event.destinationAddress || ''}`
+      : event.destinationAddress || '';
+
+    return `
+      <div class="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-200">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p class="font-bold">${escapeHtml(event.eventName || '名称未設定イベント')}</p>
+            <p class="mt-1 text-sm text-slate-600">${escapeHtml(event.eventDate || '日付未設定')} / ${escapeHtml(destination)}</p>
+            <p class="mt-1 text-xs text-slate-500">eventId: ${escapeHtml(event.eventId)}</p>
+          </div>
+          <button class="local-event-open rounded-xl bg-team-600 px-4 py-2 text-sm font-bold text-white hover:bg-team-700" data-event-id="${escapeHtml(event.eventId)}">
+            開く
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+
+  $$('.local-event-open').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      location.href = `${location.pathname}?eventId=${encodeURIComponent(btn.dataset.eventId)}`;
+    });
+  });
+}
+
 async function apiPost(action, payload = {}) {
   const res = await fetch(API_URL, {
     method: 'POST',
@@ -88,6 +159,7 @@ function init() {
 
   if (!state.eventId) {
     $('#setupView').classList.remove('hidden');
+    renderLocalEvents();
     return;
   }
 
@@ -100,6 +172,14 @@ function bindEvents() {
   $('#existingEventId').addEventListener('keydown', (event) => {
     if (event.key === 'Enter') openExistingEvent();
   });
+
+  $('#clearLocalEventsBtn').addEventListener('click', () => {
+    if (!confirm('このブラウザに保存されたイベント履歴を削除しますか？')) return;
+    saveLocalEvents([]);
+    renderLocalEvents();
+    showToast('イベント履歴を削除しました。');
+  });
+
   $('#createEventBtn').addEventListener('click', createEvent);
   $('#copyEventIdBtn').addEventListener('click', copyEventId);
   $('#copyUrlBtn').addEventListener('click', copyShareUrl);
@@ -147,6 +227,16 @@ async function createEvent() {
   try {
     setLoading(btn, true, '作成中...');
     const data = await apiPost('createEvent', { eventName, eventDate, destinationName, destinationAddress });
+
+    rememberCreatedEvent({
+      eventId: data.eventId,
+      eventName,
+      eventDate,
+      destinationName,
+      destinationAddress,
+      createdAt: new Date().toISOString()
+    });
+
     location.href = `${location.pathname}?eventId=${encodeURIComponent(data.eventId)}`;
   } catch (error) {
     alert(error.message);
@@ -197,9 +287,11 @@ function submitMemberForm(event) {
   const form = event.currentTarget;
   const formData = new FormData(form);
   const payload = Object.fromEntries(formData.entries());
+
   payload.eventId = state.eventId;
   payload.largeCargo = formData.has('largeCargo');
   payload.capacity = payload.type === 'driver' ? Number(payload.capacity || 1) : '';
+
   if (!payload.memberId) delete payload.memberId;
 
   upsertMember(payload, form);
@@ -207,6 +299,7 @@ function submitMemberForm(event) {
 
 async function upsertMember(payload, form) {
   const submitBtn = form.querySelector('button[type="submit"], button:not([type])');
+
   try {
     setLoading(submitBtn, true, payload.memberId ? '更新中...' : '登録中...');
     await apiPost('upsertMember', payload);
@@ -242,9 +335,11 @@ function editMember(memberId) {
   if (!member) return;
 
   const form = member.type === 'driver' ? $('#driverForm') : $('#riderForm');
+
   form.querySelector('[name="memberId"]').value = member.memberId;
   form.querySelector('[name="name"]').value = member.name || '';
-  form.querySelector('[name="originStation"]').value = member.originStation || member.originAddress || '';
+  form.querySelector('[name="originStation"]').value = member.originStation || '';
+  form.querySelector('[name="originAddress"]').value = member.originAddress || '';
   form.querySelector('[name="tripPref"]').value = member.tripPref || 'round';
 
   if (member.type === 'driver') {
@@ -265,6 +360,7 @@ function editMember(memberId) {
 async function deleteMember(memberId) {
   const member = state.members.find((m) => m.memberId === memberId);
   if (!member) return;
+
   if (!confirm(`${member.name}さんを削除します。配車割当も削除されます。よろしいですか？`)) return;
 
   try {
@@ -281,6 +377,7 @@ async function deleteMember(memberId) {
 async function loadRecommendations() {
   const btn = $('#recommendBtn');
   const riderStation = $('#riderStation').value.trim();
+  const riderAddress = $('#riderAddress').value.trim();
   const tripPref = $('#riderTripPref').value;
   const trip = tripPref === 'return' ? 'return' : 'outbound';
 
@@ -288,6 +385,12 @@ async function loadRecommendations() {
     showToast('同乗希望者の最寄り駅を入力してください。');
     return;
   }
+
+  if (!riderAddress) {
+    showToast('同乗希望者の住所を入力してください。');
+    return;
+  }
+
   if (tripPref === 'local') {
     showToast('現地集合の場合、おすすめドライバーは表示しません。');
     return;
@@ -295,7 +398,12 @@ async function loadRecommendations() {
 
   try {
     setLoading(btn, true, '計算中...');
-    const data = await apiPost('recommendDrivers', { eventId: state.eventId, riderStation, trip });
+    const data = await apiPost('recommendDrivers', {
+      eventId: state.eventId,
+      riderStation,
+      riderAddress,
+      trip
+    });
     renderRecommendations(data.recommendations || []);
   } catch (error) {
     alert(error.message);
@@ -315,6 +423,9 @@ function renderRecommendations(items) {
 
   box.innerHTML = `
     <p class="mb-2 text-sm font-bold text-slate-700">おすすめのドライバー順</p>
+    <p class="mb-3 text-xs text-slate-500">
+      目的地住所・同乗希望者住所・各ドライバー住所をもとに、寄り道時間が短い順に表示しています。
+    </p>
     <div class="space-y-2">
       ${items.map((item, index) => `
         <div class="rounded-2xl bg-white p-3 ring-1 ring-slate-200">
@@ -322,14 +433,25 @@ function renderRecommendations(items) {
             <div>
               <p class="font-bold">${index + 1}. ${escapeHtml(item.driverName)}</p>
               <p class="text-xs text-slate-500">最寄り駅：${escapeHtml(item.driverStation)}</p>
+              <p class="text-xs text-slate-500">住所：${escapeHtml(item.driverAddress)}</p>
             </div>
             <span class="rounded-full ${item.largeCargo ? 'bg-green-50 text-green-700' : 'bg-slate-100 text-slate-500'} px-2 py-1 text-xs font-bold">
               ${item.largeCargo ? '大型荷物OK' : '大型荷物未対応'}
             </span>
           </div>
-          <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
-            <div class="rounded-xl bg-slate-50 p-2">追加時間<br><b>${Math.round(item.detourDurationSeconds / 60)}分</b></div>
-            <div class="rounded-xl bg-slate-50 p-2">追加距離<br><b>${(item.detourDistanceMeters / 1000).toFixed(1)}km</b></div>
+          <div class="mt-2 grid grid-cols-3 gap-2 text-sm">
+            <div class="rounded-xl bg-slate-50 p-2">
+              ドライバー→同乗者<br>
+              <b>${Math.round(item.driverToRiderDurationSeconds / 60)}分</b>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-2">
+              追加時間<br>
+              <b>${Math.round(item.detourDurationSeconds / 60)}分</b>
+            </div>
+            <div class="rounded-xl bg-slate-50 p-2">
+              追加距離<br>
+              <b>${(item.detourDistanceMeters / 1000).toFixed(1)}km</b>
+            </div>
           </div>
         </div>
       `).join('')}
@@ -360,13 +482,13 @@ function renderMemberList() {
 }
 
 function renderMemberListItem(m) {
-  const station = m.originStation || m.originAddress || '';
   return `
     <div class="rounded-xl bg-white p-3 text-sm ring-1 ring-slate-200">
       <div class="flex items-start justify-between gap-2">
         <div>
           <b>${escapeHtml(m.name)}</b> / ${TRIP_LABEL[m.tripPref] || m.tripPref}${m.type === 'driver' ? ` / ${Number(m.capacity || 1)}名` : ''}
-          <br><span class="text-slate-500">最寄り駅：${escapeHtml(station)}</span>
+          <br><span class="text-slate-500">最寄り駅：${escapeHtml(m.originStation || '')}</span>
+          <br><span class="text-slate-500">住所：${escapeHtml(m.originAddress || '')}</span>
           ${m.largeCargo ? '<br><span class="font-bold text-green-700">大型荷物OK</span>' : ''}
         </div>
         <div class="flex shrink-0 gap-1">
@@ -391,6 +513,7 @@ function assignedRiderIdsForTrip(trip) {
 
 function renderAllocationBoard() {
   destroySortables();
+
   const board = $('#allocationBoard');
   const trip = state.currentTrip;
   const drivers = state.members.filter((m) => m.type === 'driver' && eligibleForTrip(m, trip));
@@ -417,20 +540,19 @@ function renderAllocationBoard() {
 }
 
 function renderMemberCard(member) {
-  const station = member.originStation || member.originAddress || '';
   return `
     <div class="member-card cursor-grab rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-200 active:cursor-grabbing" data-member-id="${escapeHtml(member.memberId)}">
       <div class="flex items-center justify-between gap-2">
         <b>${escapeHtml(member.name)}</b>
         <span class="rounded-full bg-team-50 px-2 py-1 text-xs font-bold text-team-700">${TRIP_LABEL[member.tripPref] || member.tripPref}</span>
       </div>
-      <p class="mt-1 text-xs text-slate-500">最寄り駅：${escapeHtml(station)}</p>
+      <p class="mt-1 text-xs text-slate-500">最寄り駅：${escapeHtml(member.originStation || '')}</p>
+      <p class="text-xs text-slate-500">住所：${escapeHtml(member.originAddress || '')}</p>
     </div>`;
 }
 
 function renderDriverCard(driver) {
   const trip = state.currentTrip;
-  const station = driver.originStation || driver.originAddress || '';
   const assigned = state.assignments
     .filter((a) => a.trip === trip && a.driverId === driver.memberId)
     .sort((a, b) => Number(a.position) - Number(b.position))
@@ -442,7 +564,8 @@ function renderDriverCard(driver) {
       <div class="flex items-start justify-between gap-3">
         <div>
           <h4 class="text-lg font-bold">🚙 ${escapeHtml(driver.name)} 車</h4>
-          <p class="text-xs text-slate-500">最寄り駅：${escapeHtml(station)}</p>
+          <p class="text-xs text-slate-500">最寄り駅：${escapeHtml(driver.originStation || '')}</p>
+          <p class="text-xs text-slate-500">住所：${escapeHtml(driver.originAddress || '')}</p>
           <p class="mt-1 text-xs font-bold ${driver.largeCargo ? 'text-green-700' : 'text-slate-400'}">${driver.largeCargo ? '大型荷物OK' : '大型荷物未対応'}</p>
         </div>
         <div class="text-right">
@@ -489,6 +612,7 @@ function updateCapacityCounts() {
     const count = card.querySelector('.capacity-count');
     const over = current > capacity;
     const full = current === capacity;
+
     count.textContent = `${current} / ${capacity}`;
     count.className = `capacity-count text-sm font-black ${over ? 'text-red-600' : full ? 'text-orange-600' : 'text-team-700'}`;
     card.classList.toggle('ring-red-300', over);
@@ -499,6 +623,7 @@ function updateCapacityCounts() {
 async function saveAssignments() {
   const btn = $('#saveAssignmentsBtn');
   const items = [];
+
   $$('.passenger-list').forEach((list) => {
     const driverId = list.dataset.driverId;
     Array.from(list.querySelectorAll('.member-card')).forEach((card, index) => {
@@ -511,6 +636,7 @@ async function saveAssignments() {
     const current = card.querySelectorAll('.member-card').length + 1;
     return current > capacity;
   });
+
   if (overCapacity && !confirm('定員を超えている車があります。このまま保存しますか？')) return;
 
   try {
@@ -537,11 +663,13 @@ function openCostModal(driverId) {
   state.activeCostDriverId = driverId;
   const driver = state.members.find((m) => m.memberId === driverId);
   const cost = state.costs.find((c) => c.driverId === driverId) || {};
+
   $('#costModalTitle').textContent = `${driver?.name || ''} 車の精算`;
   $('#gasCost').value = Number(cost.gasCost || 0);
   $('#tollCost').value = Number(cost.tollCost || 0);
   $('#costModal').classList.remove('hidden');
   $('#costModal').classList.add('flex');
+
   renderSettlementResult();
 }
 
@@ -562,9 +690,17 @@ function getSettlementRows(driverId) {
   if (!driver) return [];
 
   const rowsByMember = new Map();
+
   const ensure = (member, role) => {
     if (!rowsByMember.has(member.memberId)) {
-      rowsByMember.set(member.memberId, { memberId: member.memberId, name: member.name, role, outbound: false, return: false, weight: 0 });
+      rowsByMember.set(member.memberId, {
+        memberId: member.memberId,
+        name: member.name,
+        role,
+        outbound: false,
+        return: false,
+        weight: 0
+      });
     }
     return rowsByMember.get(member.memberId);
   };
@@ -618,6 +754,7 @@ function renderSettlementResult() {
 
 async function saveCost() {
   const btn = $('#saveCostBtn');
+
   try {
     setLoading(btn, true, '保存中...');
     await apiPost('updateCosts', {
